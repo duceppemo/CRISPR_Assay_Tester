@@ -210,7 +210,7 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--cutoff', metavar=0.01,
                         type=float, default=0.01,
                         required=True,
-                        help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.01 (1%).'
+                        help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.01.'
                              ' Mandatory.')
 
     # Get the arguments into an object
