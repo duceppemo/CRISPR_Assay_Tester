@@ -88,7 +88,7 @@ class FastaExtract(object):
         #total_cnt = FastaExtract.count_fasta_entries(input_alignment)
 
         print('Parsing file...')
-        with gzip.open(input_alignment, 'rb') if input_alignment.endswith('gz') else open(input_alignment, 'r') as in_f:
+        with gzip.open(input_alignment, 'rb', 1024 * 1024) if input_alignment.endswith('gz') else open(input_alignment, 'r', 1024 * 1024) as in_f:
             seq_list = list()
             #for line in in_f:  # Step input file line by line
             #for line in tqdm(in_f, total=FastaExtract.get_num_lines(input_alignment)):
