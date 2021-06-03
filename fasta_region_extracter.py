@@ -5,7 +5,6 @@ import pandas as pd
 import numpy as np
 import requests
 from tqdm import tqdm
-import mmap
 
 
 class FastaExtract(object):
@@ -17,6 +16,8 @@ class FastaExtract(object):
         self.cutoff = args.cutoff
 
         # Data
+        self.extracted = '.'.join(self.mafft_alignment.split('.')[:-1]) + '_extracted.txt'
+        self.stats = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'
         self.roi_dict = dict
 
         # Run
@@ -28,7 +29,9 @@ class FastaExtract(object):
 
         # Parse alignment file to extract counts for each variant of the region of interest
         print('Parsing alignment file and extraction ROI...')
-        roi_dict = self.extract(self.mafft_alignment, self.start_position, self.end_position)
+        self.extract(self.mafft_alignment, self.start_position, self.end_position)
+        print('Filtering the ROI...')
+        roi_dict = self.filter_n(self.extracted)
 
         # Output the variant frequency table
         print('Filtering ROI and preparing report file...')
@@ -41,7 +44,7 @@ class FastaExtract(object):
             raise Exception('Could not locate alignment file. Please use absolute path to file.')
 
     @staticmethod
-    def block_read(my_file, size=65536):
+    def block_read(my_file, size=1048576):
         while True:
             b = my_file.read(size)
             if not b:
@@ -49,19 +52,10 @@ class FastaExtract(object):
             yield b
 
     @staticmethod
-    def count_fasta_entries(fasta_file):
-        total_cnt = 0  # Total entries in fasta file
-        with gzip.open(fasta_file, 'rb') if fasta_file.endswith('gz') else open(fasta_file, 'r') as in_f:
-            if fasta_file.endswith('gz'):
-                total_cnt = sum(bl.count(b'>') for bl in FastaExtract.block_read(in_f))
-            else:
-                total_cnt = sum(bl.count('>') for bl in FastaExtract.block_read(in_f))
-        return total_cnt
-
-    @staticmethod
     def count_lines(my_file):
         total_cnt = 0  # Total entries in fasta file
-        with gzip.open(my_file, 'rb') if my_file.endswith('gz') else open(my_file, 'r') as in_f:
+        with gzip.open(my_file, 'rb', 1024*1024) if my_file.endswith('gz') \
+                else open(my_file, 'r', 1024*1024) as in_f:
             if my_file.endswith('gz'):
                 total_cnt = sum(bl.count(b'\n') for bl in FastaExtract.block_read(in_f))
             else:
@@ -69,62 +63,55 @@ class FastaExtract(object):
         return total_cnt
 
     @staticmethod
-    def get_num_lines(file_path):
-        fp = open(file_path, "r+")
-        buf = mmap.mmap(fp.fileno(), 0)
-        lines = 0
-        while buf.readline():
-            lines += 1
-        return lines
-
-    @staticmethod
     def extract(input_alignment, start, end):
-        seq_dict = dict()  #
+        out_file = '.'.join(input_alignment.split('.')[:-1]) + '_extracted.txt'
 
         start_index = start - 1
         end_index = end - 1
 
-        print('Conting entries...')
-        #total_cnt = FastaExtract.count_fasta_entries(input_alignment)
+        with open(out_file, 'w') as out_f:
+            with gzip.open(input_alignment, 'rb', 1024*1024) if input_alignment.endswith('gz') \
+                    else open(input_alignment, 'r', 1024*1024) as in_f:
+                seq_list = list()
+                for line in tqdm(in_f, total=FastaExtract.count_lines(input_alignment)):
+                    line = line.rstrip()
+                    if input_alignment.endswith('gz'):
+                        line = line.decode()  # Convert from binary to string
+                    if not line:  # If line is empty
+                        continue  # Skip to next line
 
-        print('Parsing file...')
-        with gzip.open(input_alignment, 'rb', 1024 * 1024) if input_alignment.endswith('gz') else open(input_alignment, 'r', 1024 * 1024) as in_f:
-            seq_list = list()
-            #for line in in_f:  # Step input file line by line
-            #for line in tqdm(in_f, total=FastaExtract.get_num_lines(input_alignment)):
-            for line in tqdm(in_f, total=FastaExtract.count_lines(input_alignment)):
+                    if line.startswith('>') and not seq_list:  # First line
+                        continue  # Skip to next line
+                    elif line.startswith('>') and seq_list:  # A new sequence starts
+                        seq = ''.join(seq_list)  # Combine all lines if sequence spanned over multiple lines
+                        extracted_seq = seq[start_index:end_index].upper()  # Extract region of interest by slicing
+                        out_f.write('{}\n'.format(extracted_seq))
+                        seq_list = list()  # Empty list that collects the
+                    else:  # Sequence line
+                        seq_list.append(line)  # Fetch sequences spanning over multiple lines
+                # For the last entry in the file
+                seq = ''.join(seq_list)
+                extracted_seq = seq[start_index:end_index].upper()
+                out_f.write('{}\n'.format(extracted_seq))
+
+    @staticmethod
+    def filter_n(extracted_roi):
+        seq_dict = dict()
+
+        with open(extracted_roi, 'r', 1024*1024) as in_f:
+            for line in in_f:
                 line = line.rstrip()
-                if input_alignment.endswith('gz'):
-                    line = line.decode()  # Convert from binary to string
                 if not line:  # If line is empty
                     continue  # Skip to next line
+                if any([x in line for x in ['N', 'n']]):  # Skip extracted sequences with Ns
+                    continue
 
-                if line.startswith('>') and not seq_list:  # First line
-                    continue  # Skip to next line
-                elif line.startswith('>') and seq_list:  # A new sequence starts
-                    seq = ''.join(seq_list)  # Combine all lines if sequence spanned over multiple lines
-                    extracted_seq = seq[start_index:end_index].upper()  # Extract region of interest by slicing
-                    if 'N' in extracted_seq:  # Skip extracted sequences with Ns
-                        continue
+                # Add to dictionary
+                if line in seq_dict:
+                    seq_dict[line] += 1  # Increase count by 1
+                else:
+                    seq_dict[line] = 1  # Set count to 1
 
-                    # Add to dictionary
-                    try:  # Try to add it
-                        seq_dict[extracted_seq] += 1  # Increase count by 1
-                    except KeyError:  # Create key if it doesn't exist
-                        seq_dict[extracted_seq] = 1  # Set count to 1
-
-                    seq_list = list()  # Empty list that collects the
-                else:  # Sequence line
-                    seq_list.append(line)  # Fetch sequences spanning over multiple lines
-            # For the last entry in the file
-            seq = ''.join(seq_list)
-            extracted_seq = seq[start_index:end_index].upper()
-            if 'N' in extracted_seq:  # Skip extracted sequences with Ns
-                return  # ???
-            try:
-                seq_dict[extracted_seq] += 1
-            except KeyError:
-                seq_dict[extracted_seq] = 1
         return seq_dict
 
     @staticmethod
@@ -210,7 +197,7 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--cutoff', metavar=0.01,
                         type=float, default=0.01,
                         required=True,
-                        help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.01.'
+                        help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.01 (1%).'
                              ' Mandatory.')
 
     # Get the arguments into an object
