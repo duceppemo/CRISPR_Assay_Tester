@@ -32,16 +32,15 @@ class FastaExtract(object):
 
         # Parse alignment file to extract counts for each variant of the region of interest
         print('Parsing alignment file and extraction ROI...')
-        FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)
+        #FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)
         roi_dict = FastaExtract.filter_n(self.extracted)
 
         # Output the variant frequency table
         print('Filtering ROI and preparing report file...')
-        df1 = FastaExtract.filter_cutoff(roi_dict, self.cutoff, self.ref)
-
         # Replace conserved bases with dots
         roi_ref = FastaExtract.extract_ref(self.ref, self.start_position, self.end_position)
-        df2 = FastaExtract.mask_alignment(df1, roi_ref)
+        df1 = FastaExtract.filter_cutoff(roi_dict, self.cutoff, roi_ref)
+        df2 = FastaExtract.mask_alignment(df1)
 
         # Print table
         FastaExtract.print_table(df2, self.output_tsv)
@@ -136,7 +135,8 @@ class FastaExtract(object):
                     continue
                 else:
                     seq_list.append(line)
-        return ''.join(seq_list)[start - 1: end - 1]
+        extracted_ref = ''.join(seq_list)[start - 1: end - 1]
+        return extracted_ref
 
     @staticmethod
     def filter_cutoff(seq_dict, cutoff, roi_ref):
@@ -146,10 +146,10 @@ class FastaExtract(object):
         # Add column at the end for frequencies
         total = df[0].sum()  # Sum all the counts
         freq_list = [float('{:.2f}'.format(x/total*100)) for x in df[0]]
-        df['Frequency'] = freq_list
+        df['Frequency (%)'] = freq_list
 
         # Remove lines with frequency below cutoff
-        df = df[df['Frequency'] > cutoff * 100]
+        df = df[df['Frequency (%)'] > cutoff * 100]
 
         # Sort descending based on index values
         df.sort_values(by=0, ascending=False, inplace=True)
@@ -167,18 +167,16 @@ class FastaExtract(object):
         df = df.rename(columns={'index': 'Variant'})
 
         # Rename columns
-        df.columns = ['Variant', 'Count', 'Frequency']
+        df.columns = ['Variant', 'Count', 'Frequency (%)']
 
         # Move columns
-        df = df[['Count', 'Frequency', 'Variant']]
+        df = df[['Count', 'Frequency (%)', 'Variant']]
 
         # Insert reference sequence at first line
-        old_idx = df.index
-        new_idx = ['Wuhan', old_idx]
-        df.loc[-1] = ['', '', roi_ref]  # adding a row
+        new_row = pd.DataFrame({'Count': '', 'Frequency (%)': '', 'Variant': roi_ref}, index=['Wuhan-Hu-1'])
+        df = pd.concat([new_row, df])
 
-        # with open(output_tsv, 'w') as out_f:
-        #    df.to_csv(out_f, sep='\t', header=True, index=True)
+        print(df)
         return df
 
     @staticmethod
