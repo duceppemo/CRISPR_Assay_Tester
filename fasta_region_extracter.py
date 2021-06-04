@@ -14,28 +14,37 @@ class FastaExtract(object):
         self.start_position = args.start
         self.end_position = args.end
         self.cutoff = args.cutoff
+        self.ref = args.reference
 
         # Data
+        self.roi_dict = dict
+
+        # Output files
         self.extracted = '.'.join(self.mafft_alignment.split('.')[:-1]) + '_extracted.txt'
         self.stats = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'
-        self.roi_dict = dict
+        self.output_tsv = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'  # Create path to report
 
         # Run
         self.run()
 
     def run(self):
         self.check()  # Check if can find input alignment file
-        output_tsv = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'  # Create path to report
 
         # Parse alignment file to extract counts for each variant of the region of interest
         print('Parsing alignment file and extraction ROI...')
-        self.extract(self.mafft_alignment, self.start_position, self.end_position)
-        print('Filtering the ROI...')
-        roi_dict = self.filter_n(self.extracted)
+        FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)
+        roi_dict = FastaExtract.filter_n(self.extracted)
 
         # Output the variant frequency table
         print('Filtering ROI and preparing report file...')
-        self.report(roi_dict, output_tsv, self.cutoff)
+        df1 = FastaExtract.filter_cutoff(roi_dict, self.cutoff, self.ref)
+
+        # Replace conserved bases with dots
+        roi_ref = FastaExtract.extract_ref(self.ref, self.start_position, self.end_position)
+        df2 = FastaExtract.mask_alignment(df1, roi_ref)
+
+        # Print table
+        FastaExtract.print_table(df2, self.output_tsv)
 
     def check(self):
         if '~' in self.mafft_alignment:
@@ -115,7 +124,22 @@ class FastaExtract(object):
         return seq_dict
 
     @staticmethod
-    def report(seq_dict, output_tsv, cutoff):
+    def extract_ref(ref, start, end):
+        with gzip.open(ref, 'rb', 1024*1024) if ref.endswith('gz') \
+                else open(ref, 'r', 1024*1024) as in_f:
+            seq_list = list()
+            for line in in_f:
+                line = line.rstrip()
+                if not line:
+                    continue
+                if line.startswith('>'):
+                    continue
+                else:
+                    seq_list.append(line)
+        return ''.join(seq_list)[start - 1: end - 1]
+
+    @staticmethod
+    def filter_cutoff(seq_dict, cutoff, roi_ref):
         # Convert dictionary to Pandas dataframe
         df = pd.DataFrame.from_dict(seq_dict, orient='index')
 
@@ -147,8 +171,23 @@ class FastaExtract(object):
 
         # Move columns
         df = df[['Count', 'Frequency', 'Variant']]
-        print(df)
 
+        # Insert reference sequence at first line
+        old_idx = df.index
+        new_idx = ['Wuhan', old_idx]
+        df.loc[-1] = ['', '', roi_ref]  # adding a row
+
+        # with open(output_tsv, 'w') as out_f:
+        #    df.to_csv(out_f, sep='\t', header=True, index=True)
+        return df
+
+    @staticmethod
+    def mask_alignment(df):
+        # compare to wild type
+        return df
+
+    @staticmethod
+    def print_table(df, output_tsv):
         with open(output_tsv, 'w') as out_f:
             df.to_csv(out_f, sep='\t', header=True, index=True)
 
@@ -198,6 +237,11 @@ if __name__ == '__main__':
                         type=float, default=0.01,
                         required=True,
                         help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.01 (1%).'
+                             ' Mandatory.')
+    parser.add_argument('-r', '--reference', metavar='reference.fasta',
+                        required=True,
+                        type=str,
+                        help='Reference fasta file.'
                              ' Mandatory.')
 
     # Get the arguments into an object
