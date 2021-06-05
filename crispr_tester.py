@@ -6,6 +6,7 @@ import numpy as np
 import requests
 from tqdm import tqdm
 import subprocess
+import io
 
 
 class FastaExtract(object):
@@ -47,6 +48,12 @@ class FastaExtract(object):
         # Mask sequences
         FastaExtract.mask_alignment(df)
         FastaExtract.print_table(df, self.masked_output_tsv)
+
+        # GGGenome
+        # Loop dataframe and check sequence with GGGenome
+        # Results are returned in a new dataframe
+        # TODO
+        df1 = FastaExtract.run_gggenome_online(roi_ref)
 
     def check(self):
         if '~' in self.mafft_alignment:
@@ -219,7 +226,7 @@ class FastaExtract(object):
             subprocess.Popen(cmd, stdout=f)  # write standard output (alignment) to file
 
     @staticmethod
-    def run_gggenome_online(seq, output_file):
+    def run_gggenome_online(seq):
         """
         http://gggenome.dbcls.jp/help.html
 
@@ -233,14 +240,15 @@ class FastaExtract(object):
             format: html, txt, csv, bed, gff, json. (default: html)
             download: Download result as a file. (optional)
         """
-        url = 'http[s]://GGGenome.dbcls.jp/SARS-CoV-2/0/+/nogap/{}.csv.download'.format(seq)
+        url = 'https://GGGenome.dbcls.jp/SARS-CoV-2/0/+/nogap/{}.csv.download'.format(seq)
         r = requests.get(url, stream=True)
         if r.status_code != 200:
             r.raise_for_status()
             # raise Exception('Problem with GGGenome URL request: {}'.format(r.status_code))
         else:
-            with open(output_file, 'w') as f:
-                f.write(r.content.decode())
+            # Parse results into Pandas dataframe using "fake" file handle with SingIO
+            df = pd.read_csv(io.StringIO(r.content.decode()), sep=',', skiprows=4)
+            return df
 
 
 if __name__ == '__main__':
