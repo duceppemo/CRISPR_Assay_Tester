@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/fasta_region_extracter.iml" filepath="$PROJECT_DIR$/fasta_region_extracter.iml" />
+      <module fileurl="file://$PROJECT_DIR$/crispr_tester.iml" filepath="$PROJECT_DIR$/crispr_tester.iml" />
     </modules>
   </component>
 </project>

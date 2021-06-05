@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import requests
 from tqdm import tqdm
+import subprocess
 
 
 class FastaExtract(object):
@@ -22,7 +23,8 @@ class FastaExtract(object):
         # Output files
         self.extracted = '.'.join(self.mafft_alignment.split('.')[:-1]) + '_extracted.txt'
         self.stats = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'
-        self.output_tsv = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'  # Create path to report
+        self.output_tsv = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'
+        self.masked_output_tsv = os.path.dirname(self.mafft_alignment) + '/ROI_masked_stats.tsv'
 
         # Run
         self.run()
@@ -39,11 +41,12 @@ class FastaExtract(object):
         print('Filtering ROI and preparing report file...')
         # Replace conserved bases with dots
         roi_ref = FastaExtract.extract_ref(self.ref, self.start_position, self.end_position)
-        df1 = FastaExtract.filter_cutoff(roi_dict, self.cutoff, roi_ref)
-        df2 = FastaExtract.mask_alignment(df1)
+        df = FastaExtract.filter_cutoff(roi_dict, self.cutoff, roi_ref)
+        FastaExtract.print_table(df, self.output_tsv)  # Print table
 
-        # Print table
-        FastaExtract.print_table(df2, self.output_tsv)
+        # Mask sequences
+        FastaExtract.mask_alignment(df)
+        FastaExtract.print_table(df, self.masked_output_tsv)
 
     def check(self):
         if '~' in self.mafft_alignment:
@@ -176,18 +179,44 @@ class FastaExtract(object):
         new_row = pd.DataFrame({'Count': '', 'Frequency (%)': '', 'Variant': roi_ref}, index=['Wuhan-Hu-1'])
         df = pd.concat([new_row, df])
 
-        print(df)
         return df
 
     @staticmethod
     def mask_alignment(df):
+        # Get ref sequence
+        ref = df.loc['Wuhan-Hu-1', 'Variant']
         # compare to wild type
+        for i, row in df.iterrows():
+            if i == 'Wuhan-Hu-1':  # Don't change the reference sequence
+                continue
+            seq = df.loc[i, 'Variant']
+            seq_list = list()
+            for j, b in enumerate(seq):
+                if b == ref[j]:
+                    seq_list.append('.')
+                else:
+                    seq_list.append(b)
+            masked_seq = ''.join(seq_list)
+
+            # Replace variant sequence in dataframe with masked one
+            df.loc[i, 'Variant'] = masked_seq
+
+        print(df)
         return df
 
     @staticmethod
     def print_table(df, output_tsv):
         with open(output_tsv, 'w') as out_f:
             df.to_csv(out_f, sep='\t', header=True, index=True)
+
+    @staticmethod
+    def run_mafft(input_fasta, reference_fasta, mafft_cutoff):
+        output_alignment = '.'.join(input_fasta.split('.')[:-1]) + '_mafft' + mafft_cutoff + '.fasta'
+        cmd = ['mafft', '--auto', '--keeplength',
+               '--maxambiguous', str(mafft_cutoff),
+               '--addfragments', input_fasta, reference_fasta]
+        with open(output_alignment, 'w') as f:
+            subprocess.Popen(cmd, stdout=f)  # write standard output (alignment) to file
 
     @staticmethod
     def run_gggenome_online(seq, output_file):
@@ -221,20 +250,20 @@ if __name__ == '__main__':
                         type=str,
                         help='Mafft alignment file.'
                              ' Mandatory.')
-    parser.add_argument('-s', '--start', metavar='23',
+    parser.add_argument('-s', '--start', metavar='29192',
                         required=True,
                         type=int,
                         help='Start position for extraction.'
                              ' Mandatory.')
-    parser.add_argument('-e', '--end', metavar='100',
+    parser.add_argument('-e', '--end', metavar='29215',
                         required=True,
                         type=int,
                         help='Length of the sequence to extract.'
                              ' Mandatory.')
-    parser.add_argument('-c', '--cutoff', metavar=0.01,
+    parser.add_argument('-c', '--cutoff', metavar='0.01',
                         type=float, default=0.01,
                         required=True,
-                        help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.01 (1%).'
+                        help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.01.'
                              ' Mandatory.')
     parser.add_argument('-r', '--reference', metavar='reference.fasta',
                         required=True,
