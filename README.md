@@ -20,7 +20,7 @@ python crispr_tester.py -h
 
 ## Usage
 ```
-usage: crispr_tester.py [-h] -a mafft_alignment.fasta -s 23 -e 100 -c 0.01 -r reference.fasta
+usage: crispr_tester.py [-h] -a mafft_alignment.fasta -s 29192 -e 29215 -c 0.01 -r reference.fasta
 
 Extract region from fasta file.
 
@@ -28,8 +28,10 @@ optional arguments:
   -h, --help            show this help message and exit
   -a mafft_alignment.fasta, --alignment mafft_alignment.fasta
                         Mafft alignment file. Mandatory.
-  -s 23, --start 23     Start position for extraction. Mandatory.
-  -e 100, --end 100     Length of the sequence to extract. Mandatory.
+  -s 29192, --start 29192
+                        Start position for extraction. Mandatory.
+  -e 29215, --end 29215
+                        Length of the sequence to extract. Mandatory.
   -c 0.01, --cutoff 0.01
                         Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.01. Mandatory.
   -r reference.fasta, --reference reference.fasta
