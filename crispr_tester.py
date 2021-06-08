@@ -31,6 +31,7 @@ class FastaExtract(object):
         self.run()
 
     def run(self):
+        FastaExtract.run_gggenome_online('TTTGCCCCCAGCGCTTCAGCGTT', 'refseq', 0)  # debug
         self.check()  # Check if can find input alignment file
 
         # Parse alignment file to extract counts for each variant of the region of interest
@@ -53,7 +54,7 @@ class FastaExtract(object):
         # Loop dataframe and check sequence with GGGenome
         # Results are returned in a new dataframe
         # TODO
-        df1 = FastaExtract.run_gggenome_online(roi_ref)
+        df1 = FastaExtract.run_gggenome_online(roi_ref, 'refseq', 0)
 
     def check(self):
         if '~' in self.mafft_alignment:
@@ -226,7 +227,7 @@ class FastaExtract(object):
             subprocess.Popen(cmd, stdout=f)  # write standard output (alignment) to file
 
     @staticmethod
-    def run_gggenome_online(seq):
+    def run_gggenome_online(seq, db, mismatch):
         """
         http://gggenome.dbcls.jp/help.html
 
@@ -240,15 +241,20 @@ class FastaExtract(object):
             format: html, txt, csv, bed, gff, json. (default: html)
             download: Download result as a file. (optional)
         """
-        url = 'https://GGGenome.dbcls.jp/SARS-CoV-2/0/+/nogap/{}.csv.download'.format(seq)
+        url = 'https://GGGenome.dbcls.jp/{}/{}/+/nogap/{}.csv.download'.format(seq, db, mismatch)
         r = requests.get(url, stream=True)
         if r.status_code != 200:
             r.raise_for_status()
             # raise Exception('Problem with GGGenome URL request: {}'.format(r.status_code))
         else:
             # Parse results into Pandas dataframe using "fake" file handle with SingIO
-            df = pd.read_csv(io.StringIO(r.content.decode()), sep=',', skiprows=4)
-            return df
+            try:
+                df = pd.read_csv(io.StringIO(r.content.decode()), sep=',', skiprows=4)
+                return df
+            except Exception as e:
+                print(type(e).__name__, e)
+
+                test = 1
 
 
 if __name__ == '__main__':

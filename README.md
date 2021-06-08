@@ -7,18 +7,15 @@ Use mafft(https://mafft.cbrc.jp/alignment/software/), gggenome (https://gggenome
 
 ## Installation
 - Make sure you have `conda` installed (https://docs.conda.io/en/latest/miniconda.html).
-- Create a conda virtual environment:
+- Create a conda virtual environment and install required packages:
 ```
-conda create -n crispr_tester
+conda create -n crispr_tester git panadas mafft requests tqdm
 ```
-- Clone repository:
+- Clone repository and test tool:
 ```
 git clone https://github.com/duceppemo/CRISPR_Assay_Tester
-
-```
-- Install requirements:
-```
-conda install panadas mafft requests tqdm
+cd CRISPR_Assay_Tester
+python crispr_tester.py -h
 ```
 
 ## Usage
