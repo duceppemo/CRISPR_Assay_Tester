@@ -26,23 +26,28 @@ class FastaExtract(object):
         self.stats = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'
         self.output_tsv = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'
         self.masked_output_tsv = os.path.dirname(self.mafft_alignment) + '/ROI_masked_stats.tsv'
+        self.gggenome_output_tsv = os.path.dirname(self.mafft_alignment) + '/GGGenome_matches.tsv'
 
         # Run
         self.run()
 
     def run(self):
-        FastaExtract.run_gggenome_online('TTTGCCCCCAGCGCTTCAGCGTT', 'refseq', 0)  # debug
+
+        # Debug
+        # df0 = FastaExtract.run_gggenome_online('TTTGCCCCCAGCGCTTCAGCGTT', 'COVID19-primercheck-EUL-20200501', 0)
+
         self.check()  # Check if can find input alignment file
+
+        roi_ref = FastaExtract.extract_ref(self.ref, self.start_position, self.end_position)
 
         # Parse alignment file to extract counts for each variant of the region of interest
         print('Parsing alignment file and extraction ROI...')
-        #FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)
+        FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
         roi_dict = FastaExtract.filter_n(self.extracted)
 
         # Output the variant frequency table
         print('Filtering ROI and preparing report file...')
         # Replace conserved bases with dots
-        roi_ref = FastaExtract.extract_ref(self.ref, self.start_position, self.end_position)
         df = FastaExtract.filter_cutoff(roi_dict, self.cutoff, roi_ref)
         FastaExtract.print_table(df, self.output_tsv)  # Print table
 
@@ -50,11 +55,33 @@ class FastaExtract(object):
         FastaExtract.mask_alignment(df)
         FastaExtract.print_table(df, self.masked_output_tsv)
 
+        # TODO -> Create a dunction to do the GGGenome operations.
         # GGGenome
         # Loop dataframe and check sequence with GGGenome
         # Results are returned in a new dataframe
-        # TODO
-        df1 = FastaExtract.run_gggenome_online(roi_ref, 'refseq', 0)
+        # Maseter GGGenome dataframe
+        ggg_df = pd.DataFrame(columns=['# name', 'strand', 'start', 'end', 'snippet', 'snippet_pos', 'snippet_end',
+                                       'query', 'sbjct', 'align', 'edit', 'match', 'mis', 'del', 'ins'])
+
+        # Loop through mismatches from 0 to 5
+        for mismatch in range(0, 5+1):  # 0 to 5
+            df1 = FastaExtract.run_gggenome_online(roi_ref, 'COVID19-primercheck-EUL-20200501', mismatch)
+            # Check if df1 is not empty
+            if df1.empty:
+                raise Exception('Could not find any match in GGGenome "COVID19-primercheck-EUL-20200501" database.')
+            # Concatenate with master GGGenome dataframe
+            ggg_df = pd.concat([ggg_df, df1])
+
+        # Remove matches to reference???
+
+        # Remove duplicated entries
+        ggg_df = ggg_df.drop_duplicates()
+
+        # Write GGGenome df to CSV file
+        FastaExtract.print_table(ggg_df, self.gggenome_output_tsv)
+
+        # Reformat GGGenome output table
+        # reformat_df = pd.DataFrame(columns=['Cas Variant', 'Organism', ])
 
     def check(self):
         if '~' in self.mafft_alignment:
@@ -241,7 +268,7 @@ class FastaExtract(object):
             format: html, txt, csv, bed, gff, json. (default: html)
             download: Download result as a file. (optional)
         """
-        url = 'https://GGGenome.dbcls.jp/{}/{}/+/nogap/{}.csv.download'.format(seq, db, mismatch)
+        url = 'https://GGGenome.dbcls.jp/{}/{}/+/nogap/{}.csv.download'.format(db, mismatch, seq)
         r = requests.get(url, stream=True)
         if r.status_code != 200:
             r.raise_for_status()
@@ -253,8 +280,6 @@ class FastaExtract(object):
                 return df
             except Exception as e:
                 print(type(e).__name__, e)
-
-                test = 1
 
 
 if __name__ == '__main__':
