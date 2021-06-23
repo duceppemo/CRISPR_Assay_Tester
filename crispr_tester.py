@@ -268,12 +268,6 @@ class FastaExtract(object):
         # Loop dataframe and check sequence with GGGenome
         # Results are returned in a new dataframe
 
-        # Generate headers for differences (mismatches and gaps)
-        # hit_dict = dict()
-        # for diff in range(0, max_diff+1):
-        #     hit_dict[diff] = 0
-        # hit_dict['title'] = ''
-
         # Master GGGenome dataframe
         ggg_df = pd.DataFrame(columns=['# name', 'strand', 'start', 'end', 'snippet', 'snippet_pos', 'snippet_end',
                                        'query', 'sbjct', 'align', 'edit', 'match', 'mis', 'del', 'ins'])
@@ -305,25 +299,40 @@ class FastaExtract(object):
 
         # Add results to summary dataframe
         name_list = ggg_df['# name'].to_list()  # convert name column to list
-        acc_list = [FastaExtract.extract_acc(x) for x in name_list]  # extract accession number from name column
+        # acc_list = [FastaExtract.extract_acc(x) for x in name_list]  # extract accession number from name column
         org_list = [FastaExtract.extract_org(x) for x in name_list]
         # remove duplicates from list
-        acc_list = list(dict.fromkeys(acc_list))
+        # acc_list = list(dict.fromkeys(acc_list))
+        org_list = list(dict.fromkeys(org_list))
         diff_dict = dict()
-        for i, acc in enumerate(acc_list):
-            if acc not in diff_dict.keys():
-                diff_dict[acc] = dict()
+        # for i, org in enumerate(org_list):
+        for org in org_list:
+            if org not in diff_dict.keys():
+                diff_dict[org] = dict()
+                # Generate headers for differences (mismatches and gaps)
                 for diff in range(0, max_diff+1):
-                    diff_dict[acc][diff] = 0
-                # diff_dict[acc] = hit_dict  # add all possible mismatches with zero count
-            test = org_list[i]
-            diff_dict[acc]['title'] = org_list[i]  # NOT WORKING. This changes the ORG for all acc!!!
+                    diff_dict[org][diff] = 0
+            # diff_dict[org]['acc'] = acc_list[i]  # Add organism
 
             # Fetch the difference values
-            matching_row_list = ggg_df.index[ggg_df['# name'].str.contains(acc)].tolist()
+            matching_row_list = ggg_df.index[ggg_df['# name'].str.contains(org)].tolist()
             for j in matching_row_list:
                 mismatches = len(roi_ref) - ggg_df.iloc[j]['match']
-                diff_dict[acc][mismatches] += 1  # Add 1 to the count
+                diff_dict[org][mismatches] += 1  # Add 1 to the count
+
+        # for i, acc in enumerate(acc_list):
+        #     if acc not in diff_dict.keys():
+        #         diff_dict[acc] = dict()
+        #         # Generate headers for differences (mismatches and gaps)
+        #         for diff in range(0, max_diff+1):
+        #             diff_dict[acc][diff] = 0   # add all possible mismatches with zero count
+        #     diff_dict[acc]['title'] = org_list[i]  # Add organism
+        #
+        #     # Fetch the difference values
+        #     matching_row_list = ggg_df.index[ggg_df['# name'].str.contains(acc)].tolist()
+        #     for j in matching_row_list:
+        #         mismatches = len(roi_ref) - ggg_df.iloc[j]['match']
+        #         diff_dict[acc][mismatches] += 1  # Add 1 to the count
 
         return ggg_df, diff_dict
 
@@ -338,13 +347,18 @@ class FastaExtract(object):
         # Open output file handle
         with open(output_summary_file, 'w') as f:
             # Write header
-            f.write('Accession\tOrganism\t{}m\n'.format('m\t'.join(header_list)))
+            # f.write('Accession\tOrganism\t{}m\n'.format('m\t'.join(header_list)))
+            f.write('Organism\t{}m\n'.format('m\t'.join(header_list)))
 
-            for acc in diff_dict.keys():
-                org = diff_dict[acc]['title']
-                diff_list = [str(v) for k, v in diff_dict[acc].items()][:-1]
+            # for acc in diff_dict.keys():
+            #     org = diff_dict[acc]['title']
+            #     diff_list = [str(v) for k, v in diff_dict[acc].items()][:-1]
+            #     diffs = '\t'.join(diff_list)
+            #     f.write('{}\t{}\t{}\n'.format(acc, org, diffs))
+            for org in diff_dict.keys():
+                diff_list = [str(v) for k, v in diff_dict[org].items()]
                 diffs = '\t'.join(diff_list)
-                f.write('{}\t{}\t{}\n'.format(acc, org, diffs))
+                f.write('{}\t{}\n'.format(org, diffs))
 
     @staticmethod
     def reverse_complement(seq):
@@ -357,9 +371,10 @@ class FastaExtract(object):
         org = header.split(' ', 1)[1]
         org = org.split(',')[0]
         org = org.split('chromosome')[0]
+        org = org.split('NODE')[0]
         org_list = org.split()  # split string into list
         for i, word in enumerate(org_list):
-            if any([substring in word for substring in ['ctg', 'scaf']]):
+            if any([substring in word for substring in ['ctg', 'scaf', 'scf']]):
                 del org_list[i]
         org = ' '.join(org_list)
         org = org.split('contig')[0]
