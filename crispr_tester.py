@@ -7,8 +7,7 @@ import requests
 from tqdm import tqdm
 import subprocess
 import io
-from math import ceil
-import re
+from math import floor
 
 
 class FastaExtract(object):
@@ -19,6 +18,8 @@ class FastaExtract(object):
         self.end_position = args.end
         self.cutoff = args.cutoff
         self.ref = args.reference
+        self.gap = args.gap
+        self.mismatch = args.mismatch
 
         # Data
         self.roi_dict = dict
@@ -38,11 +39,11 @@ class FastaExtract(object):
         self.check()  # Check if can find input alignment file
 
         roi_ref = FastaExtract.extract_ref(self.ref, self.start_position, self.end_position)
-        max_diff = int(ceil(len(roi_ref) * 0.2))  # Compute max mismatches for > 80% similarity
+        max_diff = int(floor(len(roi_ref) * 0.2))  # Compute max mismatches for > 80% similarity
 
         # Parse alignment file to extract counts for each variant of the region of interest
-        print('Parsing alignment file and extraction ROI...')
-        # FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
+        print('Parsing alignment file and extracting ROI...')
+        FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
         roi_dict = FastaExtract.filter_n(self.extracted)
 
         # Output the variant frequency table
@@ -56,19 +57,26 @@ class FastaExtract(object):
         FastaExtract.print_table(df, self.masked_output_tsv)
 
         # GGGenome
-        ggg_df, diff_dict = FastaExtract.loop_gggenome(roi_ref, max_diff)
+        ggg_df, diff_dict = FastaExtract.loop_gggenome(roi_ref, max_diff, self.gap)
 
         # Write GGGenome df to CSV file
         FastaExtract.print_table(ggg_df, self.gggenome_raw_output_tsv)
 
-        # Write GGGenome summary to file
-        FastaExtract.wirte_ggenome_summary_file(diff_dict, max_diff, self.gggenome_summary_output_tsv)
+        # Create GGGenome summary dataframe
+        sum_df = FastaExtract.create_gggenome_summary(diff_dict, max_diff)
+
+        # Write GGGenome summary to file from dataframe
+        FastaExtract.print_table(sum_df, self.gggenome_summary_output_tsv)
 
     def check(self):
         if '~' in self.mafft_alignment:
             self.mafft_alignment = os.path.expanduser(self.mafft_alignment)
         if not os.path.isfile(self.mafft_alignment):
             raise Exception('Could not locate alignment file. Please use absolute path to file.')
+
+        # Check if mismatches/gaps is 25% or less. Otherwise GGGenome will return an error.
+        if self.mismatch > 0.25:
+            raise Exception('Number of mismatches/gaps should be 25% (0.25) or less.')
 
     @staticmethod
     def block_read(my_file, size=1048576):
@@ -167,8 +175,13 @@ class FastaExtract(object):
         freq_list = [float('{:.2f}'.format(x/total*100)) for x in df[0]]
         df['Frequency (%)'] = freq_list
 
+        # Compute the added % of the lines to remove (below the cutoff)
+        df_rem = df[df['Frequency (%)'] < cutoff * 100]
+        cnt_rem = df_rem[0].sum()
+        freq_rem = float('{:.2f}'.format(cnt_rem/total*100))
+
         # Remove lines with frequency below cutoff
-        df = df[df['Frequency (%)'] > cutoff * 100]
+        df = df[df['Frequency (%)'] >= cutoff * 100]
 
         # Sort descending based on index values
         df.sort_values(by=0, ascending=False, inplace=True)
@@ -179,14 +192,14 @@ class FastaExtract(object):
         # Change index values
         df.index = np.arange(1, len(df[0]) + 1)
 
-        # Add name to index column
-        df.index.rename('Group', inplace=True)
-
         # Rename "index" column
         df = df.rename(columns={'index': 'Variant'})
 
         # Rename columns
         df.columns = ['Variant', 'Count', 'Frequency (%)']
+
+        # Add name to index column
+        df.index.rename('Group', inplace=True)
 
         # Move columns
         df = df[['Count', 'Frequency (%)', 'Variant']]
@@ -194,6 +207,11 @@ class FastaExtract(object):
         # Insert reference sequence at first line
         new_row = pd.DataFrame({'Count': '', 'Frequency (%)': '', 'Variant': roi_ref}, index=['Wuhan-Hu-1'])
         df = pd.concat([new_row, df])
+
+        # Add a row at the end named "Removed" with the added % of the removed lines so the added freq.=100%
+        rem_row = pd.DataFrame({'Count': cnt_rem, 'Frequency (%)': freq_rem, 'Variant': ''},
+                               index=['Variants with frequency lower than {}%'.format(cutoff * 100)])
+        df = pd.concat([df, rem_row])
 
         return df
 
@@ -235,7 +253,7 @@ class FastaExtract(object):
             subprocess.Popen(cmd, stdout=f)  # write standard output (alignment) to file
 
     @staticmethod
-    def run_gggenome_online(seq, db, mismatch):
+    def run_gggenome_online(seq, db, mismatch, gap=False):
         """
         http://gggenome.dbcls.jp/help.html
 
@@ -250,7 +268,9 @@ class FastaExtract(object):
             download: Download result as a file. (optional)
         """
         # http://gggenome.dbcls.jp/COVID19-primercheck-EUL-20200501/5/TTTGCCCCCAGCGCTTCAGCGTT
-        url = 'https://GGGenome.dbcls.jp/{}/{}/{}.csv.download'.format(db, mismatch, seq)
+        url = 'https://GGGenome.dbcls.jp/{}/{}/nogap/{}.csv.download'.format(db, mismatch, seq)
+        if gap:
+            url = 'https://GGGenome.dbcls.jp/{}/{}/{}.csv.download'.format(db, mismatch, seq)
         r = requests.get(url, stream=True)
         if r.status_code != 200:
             r.raise_for_status()
@@ -264,7 +284,7 @@ class FastaExtract(object):
                 print(type(e).__name__, e)
 
     @staticmethod
-    def loop_gggenome(roi_ref, max_diff):
+    def loop_gggenome(roi_ref, max_diff, gap):
         # Loop dataframe and check sequence with GGGenome
         # Results are returned in a new dataframe
 
@@ -274,14 +294,13 @@ class FastaExtract(object):
 
         # Reformat GGGenome output table
         # Loop through GGGenome results for each query with increasing differences allowed
+        # TODO: check for hits in human genome too.
+        db_list = ['COVID19-primercheck-EUL-20200501', 'hg19']
         for diff in range(0, max_diff+1):
-            df1 = FastaExtract.run_gggenome_online(roi_ref, 'COVID19-primercheck-EUL-20200501', diff)
+            df1 = FastaExtract.run_gggenome_online(roi_ref, 'COVID19-primercheck-EUL-20200501', diff, gap)
             # Check if df1 is not empty
             if df1.empty:
                 raise Exception('Could not find any match in GGGenome "COVID19-primercheck-EUL-20200501" database.')
-
-            # df2 = pd.DataFrame(["ere"], columns=['Organism', 'Accession', 'crRNA'] + header_list)
-            # ggg_summary_df.append(df2, ignore_index=True)
 
             # Concatenate with master GGGenome dataframe
             ggg_df = pd.concat([ggg_df, df1])
@@ -290,7 +309,6 @@ class FastaExtract(object):
         ggg_df = ggg_df.drop_duplicates()
 
         # Remove matches to reference
-        # test = ggg_df.index[ggg_df['sbjct'] == roi_ref].tolist()
         to_drop_list = ggg_df.index[ggg_df['sbjct'] == (roi_ref or FastaExtract.reverse_complement(roi_ref))].tolist()
         ggg_df.drop(to_drop_list, inplace=True)
 
@@ -299,20 +317,18 @@ class FastaExtract(object):
 
         # Add results to summary dataframe
         name_list = ggg_df['# name'].to_list()  # convert name column to list
-        # acc_list = [FastaExtract.extract_acc(x) for x in name_list]  # extract accession number from name column
         org_list = [FastaExtract.extract_org(x) for x in name_list]
+
         # remove duplicates from list
-        # acc_list = list(dict.fromkeys(acc_list))
         org_list = list(dict.fromkeys(org_list))
         diff_dict = dict()
-        # for i, org in enumerate(org_list):
+
         for org in org_list:
             if org not in diff_dict.keys():
                 diff_dict[org] = dict()
                 # Generate headers for differences (mismatches and gaps)
                 for diff in range(0, max_diff+1):
                     diff_dict[org][diff] = 0
-            # diff_dict[org]['acc'] = acc_list[i]  # Add organism
 
             # Fetch the difference values
             matching_row_list = ggg_df.index[ggg_df['# name'].str.contains(org)].tolist()
@@ -320,45 +336,36 @@ class FastaExtract(object):
                 mismatches = len(roi_ref) - ggg_df.iloc[j]['match']
                 diff_dict[org][mismatches] += 1  # Add 1 to the count
 
-        # for i, acc in enumerate(acc_list):
-        #     if acc not in diff_dict.keys():
-        #         diff_dict[acc] = dict()
-        #         # Generate headers for differences (mismatches and gaps)
-        #         for diff in range(0, max_diff+1):
-        #             diff_dict[acc][diff] = 0   # add all possible mismatches with zero count
-        #     diff_dict[acc]['title'] = org_list[i]  # Add organism
-        #
-        #     # Fetch the difference values
-        #     matching_row_list = ggg_df.index[ggg_df['# name'].str.contains(acc)].tolist()
-        #     for j in matching_row_list:
-        #         mismatches = len(roi_ref) - ggg_df.iloc[j]['match']
-        #         diff_dict[acc][mismatches] += 1  # Add 1 to the count
-
         return ggg_df, diff_dict
 
     @staticmethod
-    def wirte_ggenome_summary_file(diff_dict, max_diff, output_summary_file):
-
+    def create_gggenome_summary(diff_dict, max_diff):
         # Generate headers for differences (mismatches and gaps)
         header_list = list()
         for diff in range(0, max_diff+1):
             header_list.append(str(diff))
 
-        # Open output file handle
-        with open(output_summary_file, 'w') as f:
-            # Write header
-            # f.write('Accession\tOrganism\t{}m\n'.format('m\t'.join(header_list)))
-            f.write('Organism\t{}m\n'.format('m\t'.join(header_list)))
+        # Convert dictionary to pandas dataframe
+        df = pd.DataFrame.from_dict(diff_dict, orient='index')
 
-            # for acc in diff_dict.keys():
-            #     org = diff_dict[acc]['title']
-            #     diff_list = [str(v) for k, v in diff_dict[acc].items()][:-1]
-            #     diffs = '\t'.join(diff_list)
-            #     f.write('{}\t{}\t{}\n'.format(acc, org, diffs))
-            for org in diff_dict.keys():
-                diff_list = [str(v) for k, v in diff_dict[org].items()]
-                diffs = '\t'.join(diff_list)
-                f.write('{}\t{}\n'.format(org, diffs))
+        # Rename index column
+        df = df.rename_axis("Organism")
+        # df.index.rename(['Organism'], inplace=True)
+
+        # Prepare name for columns
+        header_list = ['m' + str(x) for x in header_list]
+
+        # Rename columns
+        df.columns = header_list
+
+        # Add a column at the end with the total mismatches per organism
+        df['Total'] = df.sum(axis=1)
+
+        # Sort rows by 1) total number of mismatches and 2) alphabetically
+        # df.sort_values(by=['Total'], ascending=False, inplace=True)  # Sort by total descending
+        df.sort_index(ascending=True, inplace=True)  # Sort alphabetically
+
+        return df
 
     @staticmethod
     def reverse_complement(seq):
@@ -412,6 +419,15 @@ if __name__ == '__main__':
                         type=str,
                         help='Reference fasta file.'
                              ' Mandatory.')
+    parser.add_argument('-g', '--gap',
+                        action='store_true',
+                        help='Allows gaps in GGGenome search. False by default.')
+    parser.add_argument('-m', '--mismatch', metavar='0.20',
+                        type=float,
+                        required=False,
+                        default=0.20,
+                        help='Percentage of mismatch allowed. Include number of gaps if enabled ("-g"). '
+                             'Default is 20% (0.20).')
 
     # Get the arguments into an object
     arguments = parser.parse_args()
