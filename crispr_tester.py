@@ -69,7 +69,7 @@ class FastaExtract(object):
 
         # Parse alignment file to extract counts for each variant of the region of interest
         print('\tParsing MAFFT alignment file and extracting ROI for each entry...')
-        # FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
+        FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
         roi_dict = FastaExtract.filter_n(self.extracted)
 
         # Output the variant frequency table
