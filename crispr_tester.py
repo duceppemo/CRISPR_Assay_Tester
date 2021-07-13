@@ -39,11 +39,12 @@ class FastaExtract(object):
         self.check()  # Check if can find input alignment file
 
         roi_ref = FastaExtract.extract_ref(self.ref, self.start_position, self.end_position)
+        print('Reference ROI: {} ({}..{})'.format(roi_ref, self.start_position, self.end_position))
         max_diff = int(floor(len(roi_ref) * 0.2))  # Compute max mismatches for > 80% similarity
 
         # Parse alignment file to extract counts for each variant of the region of interest
-        print('Parsing alignment file and extracting ROI...')
-        FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
+        print('Parsing MAFFT alignment file and extracting ROI for each entry...')
+        # FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
         roi_dict = FastaExtract.filter_n(self.extracted)
 
         # Output the variant frequency table
@@ -267,7 +268,8 @@ class FastaExtract(object):
             format: html, txt, csv, bed, gff, json. (default: html)
             download: Download result as a file. (optional)
         """
-        # http://gggenome.dbcls.jp/COVID19-primercheck-EUL-20200501/5/TTTGCCCCCAGCGCTTCAGCGTT
+        # http://gggenome.dbcls.jp/COVID19-primercheck-EUA-20200501/5/TTTGCCCCCAGCGCTTCAGCGTT
+        # http://gggenome.dbcls.jp/hg38/4/nogap/TTTGCCCCCAGCGCTTCAGCGTT
         url = 'https://GGGenome.dbcls.jp/{}/{}/nogap/{}.csv.download'.format(db, mismatch, seq)
         if gap:
             url = 'https://GGGenome.dbcls.jp/{}/{}/{}.csv.download'.format(db, mismatch, seq)
@@ -295,21 +297,32 @@ class FastaExtract(object):
         # Reformat GGGenome output table
         # Loop through GGGenome results for each query with increasing differences allowed
         # TODO: check for hits in human genome too.
-        db_list = ['COVID19-primercheck-EUL-20200501', 'hg19']
-        for diff in range(0, max_diff+1):
-            df1 = FastaExtract.run_gggenome_online(roi_ref, 'COVID19-primercheck-EUL-20200501', diff, gap)
-            # Check if df1 is not empty
-            if df1.empty:
-                raise Exception('Could not find any match in GGGenome "COVID19-primercheck-EUL-20200501" database.')
+        db_list = ['COVID19-primercheck-EUA-20200501', 'hg38']
+        for db in db_list:
+            for diff in range(0, max_diff+1):
+                df1 = FastaExtract.run_gggenome_online(roi_ref, db, diff, gap)
+                # Check if results returned
+                if df1.empty or df1['# name'][0] == '### No items found. ###':
+                    continue
+                else:
+                    ggg_df = pd.concat([ggg_df, df1])
 
-            # Concatenate with master GGGenome dataframe
-            ggg_df = pd.concat([ggg_df, df1])
+                # # Check if df1 is not empty
+                # if df1.empty:
+                #     raise Exception('Could not find any match in GGGenome "{}" database.'.format(db))
+                #
+                # # Concatenate with master GGGenome dataframe
+                # ggg_df = pd.concat([ggg_df, df1])
 
         # Remove duplicated entries
         ggg_df = ggg_df.drop_duplicates()
 
+        # Reset index
+        ggg_df.reset_index(drop=True, inplace=True)
+
         # Remove matches to reference
         to_drop_list = ggg_df.index[ggg_df['sbjct'] == (roi_ref or FastaExtract.reverse_complement(roi_ref))].tolist()
+
         ggg_df.drop(to_drop_list, inplace=True)
 
         # Reset pandas index
@@ -362,8 +375,11 @@ class FastaExtract(object):
         df['Total'] = df.sum(axis=1)
 
         # Sort rows by 1) total number of mismatches and 2) alphabetically
-        # df.sort_values(by=['Total'], ascending=False, inplace=True)  # Sort by total descending
-        df.sort_index(ascending=True, inplace=True)  # Sort alphabetically
+        df.sort_values(by=header_list, ascending=[False] * len(header_list), inplace=True)
+        # df.sort_index(ascending=True, inplace=True)  # Sort alphabetically
+
+        # Add a row at the end with total for each mismatch column
+        df.loc['Total'] = df.sum(numeric_only=True, axis=0)
 
         return df
 
@@ -375,17 +391,21 @@ class FastaExtract(object):
     @staticmethod
     def extract_org(header):
         # regex = re.compile(r"\s*ctg\s*", flags=re.IGNORECASE)
-        org = header.split(' ', 1)[1]
-        org = org.split(',')[0]
-        org = org.split('chromosome')[0]
-        org = org.split('NODE')[0]
-        org_list = org.split()  # split string into list
-        for i, word in enumerate(org_list):
-            if any([substring in word for substring in ['ctg', 'scaf', 'scf']]):
-                del org_list[i]
-        org = ' '.join(org_list)
-        org = org.split('contig')[0]
-        return org
+        org = header.split(' ')
+        if len(org) > 1:
+            org = header.split(' ', 1)[1]  # Ditch the accession number
+            org = org.split(',')[0]
+            org = org.split('chromosome')[0]
+            org = org.split('NODE')[0]
+            org_list = org.split()  # split string into list
+            for i, word in enumerate(org_list):
+                if any([substring in word for substring in ['ctg', 'scaf', 'scf']]):
+                    del org_list[i]
+            org = ' '.join(org_list)
+            org = org.split('contig')[0]
+            return org
+        else:  # hit in human genome (eg. chr2)
+            return header
 
     @staticmethod
     def extract_acc(header):
@@ -409,10 +429,10 @@ if __name__ == '__main__':
                         type=int,
                         help='Length of the sequence to extract.'
                              ' Mandatory.')
-    parser.add_argument('-c', '--cutoff', metavar='0.01',
-                        type=float, default=0.01,
+    parser.add_argument('-c', '--cutoff', metavar='0.001',
+                        type=float, default=0.001,
                         required=True,
-                        help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.01.'
+                        help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.001.'
                              ' Mandatory.')
     parser.add_argument('-r', '--reference', metavar='reference.fasta',
                         required=True,
