@@ -14,8 +14,7 @@ class FastaExtract(object):
     def __init__(self, args):
         args = args
         self.mafft_alignment = args.alignment
-        self.start_position = args.start
-        self.end_position = args.end
+        self.query = args.query
         self.cutoff = args.cutoff
         self.ref = args.reference
         self.gap = args.gap
@@ -38,27 +37,15 @@ class FastaExtract(object):
     def run(self):
         self.check()  # Check if can find input alignment file
 
-        roi_ref = FastaExtract.extract_ref(self.ref, self.start_position, self.end_position)
-        print('Reference ROI: {} ({}..{})'.format(roi_ref, self.start_position, self.end_position))
-        max_diff = int(floor(len(roi_ref) * 0.2))  # Compute max mismatches for > 80% similarity
+        # Compute the maximum number of mismatch(es) automatically based on query length
+        max_diff = int(floor(len(self.query) * self.mismatch))
 
-        # Parse alignment file to extract counts for each variant of the region of interest
-        print('Parsing MAFFT alignment file and extracting ROI for each entry...')
-        # FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
-        roi_dict = FastaExtract.filter_n(self.extracted)
+        ##### Cross-reactivity test #####
 
-        # Output the variant frequency table
-        print('Filtering ROI and preparing report file...')
-        # Replace conserved bases with dots
-        df = FastaExtract.filter_cutoff(roi_dict, self.cutoff, roi_ref)
-        FastaExtract.print_table(df, self.output_tsv)  # Print table
-
-        # Mask sequences
-        FastaExtract.mask_alignment(df)
-        FastaExtract.print_table(df, self.masked_output_tsv)
+        print('Performing cross-reactivity test for {}'.format(self.query))
 
         # GGGenome
-        ggg_df, diff_dict = FastaExtract.loop_gggenome(roi_ref, max_diff, self.gap)
+        ggg_df, diff_dict = FastaExtract.loop_gggenome(self.query, max_diff, self.gap)
 
         # Write GGGenome df to CSV file
         FastaExtract.print_table(ggg_df, self.gggenome_raw_output_tsv)
@@ -68,6 +55,32 @@ class FastaExtract(object):
 
         # Write GGGenome summary to file from dataframe
         FastaExtract.print_table(sum_df, self.gggenome_summary_output_tsv)
+
+        # Extract start and end positions from the reference Wuhan sequences to perform the inclusivity analysis
+        start, end = FastaExtract.get_start_end_positions(ggg_df)
+
+
+        ##### Inclusivity test #####
+
+        print('\nPerforming inclusivity test')
+
+        roi_ref = FastaExtract.extract_ref(self.ref, start, end)
+        print('\tReference ROI: {} ({}..{})'.format(roi_ref, start, end))
+
+        # Parse alignment file to extract counts for each variant of the region of interest
+        print('\tParsing MAFFT alignment file and extracting ROI for each entry...')
+        # FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
+        roi_dict = FastaExtract.filter_n(self.extracted)
+
+        # Output the variant frequency table
+        print('\tFiltering ROI and preparing report file...')
+        # Replace conserved bases with dots
+        df = FastaExtract.filter_cutoff(roi_dict, self.cutoff, roi_ref)
+        FastaExtract.print_table(df, self.output_tsv)  # Print table
+
+        # Mask sequences
+        FastaExtract.mask_alignment(df)
+        FastaExtract.print_table(df, self.masked_output_tsv)
 
     def check(self):
         if '~' in self.mafft_alignment:
@@ -236,7 +249,7 @@ class FastaExtract(object):
             # Replace variant sequence in dataframe with masked one
             df.loc[i, 'Variant'] = masked_seq
 
-        print(df)
+        # print(df)
         return df
 
     @staticmethod
@@ -299,6 +312,7 @@ class FastaExtract(object):
         # TODO: check for hits in human genome too.
         db_list = ['COVID19-primercheck-EUA-20200501', 'hg38']
         for db in db_list:
+            print('\tTesting query online with GGGenome using "{}" database'.format(db))
             for diff in range(0, max_diff+1):
                 df1 = FastaExtract.run_gggenome_online(roi_ref, db, diff, gap)
                 # Check if results returned
@@ -317,16 +331,13 @@ class FastaExtract(object):
         # Remove duplicated entries
         ggg_df = ggg_df.drop_duplicates()
 
-        # Reset index
+        # Reset index. Some rows have to same index.
         ggg_df.reset_index(drop=True, inplace=True)
 
-        # Remove matches to reference
-        to_drop_list = ggg_df.index[ggg_df['sbjct'] == (roi_ref or FastaExtract.reverse_complement(roi_ref))].tolist()
-
-        ggg_df.drop(to_drop_list, inplace=True)
-
-        # Reset pandas index
-        ggg_df.reset_index(drop=True, inplace=True)
+        # # Remove matches to reference
+        # to_drop_list = ggg_df.index[ggg_df['sbjct'] == (roi_ref or FastaExtract.reverse_complement(roi_ref))].tolist()
+        # ggg_df.drop(to_drop_list, inplace=True)
+        # ggg_df.reset_index(drop=True, inplace=True)  # Reset pandas index
 
         # Add results to summary dataframe
         name_list = ggg_df['# name'].to_list()  # convert name column to list
@@ -411,6 +422,10 @@ class FastaExtract(object):
     def extract_acc(header):
         return header.split(' ')[0]
 
+    @staticmethod
+    def get_start_end_positions(df):
+        return df.loc[0, 'start'], df.loc[0, 'end']
+
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='Extract region from fasta file.')
@@ -419,21 +434,16 @@ if __name__ == '__main__':
                         type=str,
                         help='Mafft alignment file.'
                              ' Mandatory.')
-    parser.add_argument('-s', '--start', metavar='29192',
+    parser.add_argument('-q', '--query', metavar='TTTNCCCCCAGCGCTTCAGCGTTC',
                         required=True,
-                        type=int,
-                        help='Start position for extraction.'
-                             ' Mandatory.')
-    parser.add_argument('-e', '--end', metavar='29215',
-                        required=True,
-                        type=int,
-                        help='Length of the sequence to extract.'
+                        type=str,
+                        help='Sequence to test (PAM+crRNA).'
                              ' Mandatory.')
     parser.add_argument('-c', '--cutoff', metavar='0.001',
                         type=float, default=0.001,
-                        required=True,
-                        help='Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.001.'
-                             ' Mandatory.')
+                        required=False,
+                        help='Cutoff frequency to keep a variant. Must be between 0 and 1.'
+                             ' Default is 0.001.')
     parser.add_argument('-r', '--reference', metavar='reference.fasta',
                         required=True,
                         type=str,
@@ -441,13 +451,15 @@ if __name__ == '__main__':
                              ' Mandatory.')
     parser.add_argument('-g', '--gap',
                         action='store_true',
-                        help='Allows gaps in GGGenome search. False by default.')
+                        help='Allows gaps in GGGenome search. Default is False.')
     parser.add_argument('-m', '--mismatch', metavar='0.20',
                         type=float,
                         required=False,
                         default=0.20,
-                        help='Percentage of mismatch allowed. Include number of gaps if enabled ("-g"). '
-                             'Default is 20% (0.20).')
+                        help='Percentage of mismatch allowed.'
+                             ' Minimum is 0 and maximum is 0.25 (GGGenome requirement).'
+                             ' Includes gaps if "-g" is used.'
+                             ' Default is 0.20.')
 
     # Get the arguments into an object
     arguments = parser.parse_args()
