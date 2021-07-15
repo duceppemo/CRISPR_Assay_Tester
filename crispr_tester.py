@@ -68,12 +68,12 @@ class FastaExtract(object):
         print('\tReference ROI: {} ({}..{})'.format(roi_ref, start, end))
 
         # Parse alignment file to extract counts for each variant of the region of interest
-        print('\tParsing MAFFT alignment file and extracting ROI for each entry...')
-        FastaExtract.extract(self.mafft_alignment, self.start_position, self.end_position)  # comment for debug
+        print('\tParsing MAFFT alignment file and extracting ROI for each entry')
+        FastaExtract.extract(self.mafft_alignment, start, end)  # comment for debug
         roi_dict = FastaExtract.filter_n(self.extracted)
 
         # Output the variant frequency table
-        print('\tFiltering ROI and preparing report file...')
+        print('\tFiltering ROI and preparing report file')
         # Replace conserved bases with dots
         df = FastaExtract.filter_cutoff(roi_dict, self.cutoff, roi_ref)
         FastaExtract.print_table(df, self.output_tsv)  # Print table
@@ -116,7 +116,7 @@ class FastaExtract(object):
         out_file = '.'.join(input_alignment.split('.')[:-1]) + '_extracted.txt'
 
         start_index = start - 1
-        end_index = end - 1
+        end_index = end
 
         with open(out_file, 'w') as out_f:
             with gzip.open(input_alignment, 'rb', 1024*1024) if input_alignment.endswith('gz') \
@@ -176,7 +176,7 @@ class FastaExtract(object):
                     continue
                 else:
                     seq_list.append(line)
-        extracted_ref = ''.join(seq_list)[start - 1: end - 1]
+        extracted_ref = ''.join(seq_list)[start - 1: end]
         return extracted_ref
 
     @staticmethod
