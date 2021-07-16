@@ -42,7 +42,7 @@ class FastaExtract(object):
 
         ##### Cross-reactivity test #####
 
-        print('Performing cross-reactivity test for {}'.format(self.query))
+        print('Performing cross-reactivity test for {} with up to {} mismatche(s)'.format(self.query, max_diff))
 
         # GGGenome
         ggg_df, diff_dict = FastaExtract.loop_gggenome(self.query, max_diff, self.gap)
@@ -81,6 +81,8 @@ class FastaExtract(object):
         # Mask sequences
         FastaExtract.mask_alignment(df)
         FastaExtract.print_table(df, self.masked_output_tsv)
+
+        print('\nDone!')
 
     def check(self):
         if '~' in self.mafft_alignment:
@@ -321,23 +323,17 @@ class FastaExtract(object):
                 else:
                     ggg_df = pd.concat([ggg_df, df1])
 
-                # # Check if df1 is not empty
-                # if df1.empty:
-                #     raise Exception('Could not find any match in GGGenome "{}" database.'.format(db))
-                #
-                # # Concatenate with master GGGenome dataframe
-                # ggg_df = pd.concat([ggg_df, df1])
-
         # Remove duplicated entries
         ggg_df = ggg_df.drop_duplicates()
 
         # Reset index. Some rows have to same index.
         ggg_df.reset_index(drop=True, inplace=True)
 
-        # # Remove matches to reference
-        # to_drop_list = ggg_df.index[ggg_df['sbjct'] == (roi_ref or FastaExtract.reverse_complement(roi_ref))].tolist()
-        # ggg_df.drop(to_drop_list, inplace=True)
-        # ggg_df.reset_index(drop=True, inplace=True)  # Reset pandas index
+        # Remove matches to unplaced contigs in human genome
+        search_list = ['_alt', '_random']
+        to_drop_list = ggg_df.index[ggg_df['# name'].str.contains('|'.join(search_list))].tolist()
+        ggg_df.drop(to_drop_list, inplace=True)
+        ggg_df.reset_index(drop=True, inplace=True)  # Reset pandas index
 
         # Add results to summary dataframe
         name_list = ggg_df['# name'].to_list()  # convert name column to list
@@ -355,7 +351,11 @@ class FastaExtract(object):
                     diff_dict[org][diff] = 0
 
             # Fetch the difference values
-            matching_row_list = ggg_df.index[ggg_df['# name'].str.contains(org)].tolist()
+            matching_row_list = list()
+            if org.startswith('chr'):
+                matching_row_list = ggg_df.index[ggg_df['# name'] == org].tolist()
+            else:
+                matching_row_list = ggg_df.index[ggg_df['# name'].str.contains(org)].tolist()
             for j in matching_row_list:
                 mismatches = len(roi_ref) - ggg_df.iloc[j]['match']
                 diff_dict[org][mismatches] += 1  # Add 1 to the count
