@@ -2,7 +2,7 @@
 CRISPR cross-reactivity and inclusivity *in silico* test.
 
 ## Description
-This is a python3 (v3.9 used) script meant to be run in a Unix environment. I will not run on a Windows system.
+This is a python3 (v3.9 used) script meant to be run in a Unix environment. I will not run on a Windows system, unless you run the Ubuntu terminal in Win10.
 
 A working internet access is required to run GGGenome (https://gggenome.dbcls.jp/).
 
