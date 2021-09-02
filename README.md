@@ -28,7 +28,7 @@ The SARS-CoV-2 Wuhan-Hu-1 reference sequence can be downloaded by clicking the t
 - Make sure you have `conda` installed (https://docs.conda.io/en/latest/miniconda.html).
 - Create a virtual environment to install the required packages:
 ```
-conda create -n crispr_tester git panadas mafft requests tqdm
+conda create -n crispr_tester git pandas mafft requests tqdm
 conda activate crispr_tester
 ```
 - Clone repository and test tool:
