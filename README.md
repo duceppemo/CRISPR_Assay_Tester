@@ -22,7 +22,7 @@ mafft \
 
 A pre-computed alignment file for all SARS-CoV-2 complete sequences from NCBI (*time stamp*) will be available soon for download.
 
-The SARS-CoV-2 Wuhan-Hu-1 reference sequence can be downloaded by clicking the this link: [NC_045512.2](https://www.ncbi.nlm.nih.gov/nuccore/NC_045512.2?report=fasta).
+The SARS-CoV-2 Wuhan-Hu-1 reference sequence can be downloaded by clicking this link: [NC_045512.2](https://www.ncbi.nlm.nih.gov/nuccore/NC_045512.2?report=fasta).
 
 ## Installation
 - Make sure you have `conda` installed (https://docs.conda.io/en/latest/miniconda.html).
