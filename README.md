@@ -41,7 +41,7 @@ python crispr_tester.py -h
 ## Usage
 
 ```
-usage: crispr_tester.py [-h] -a mafft_alignment.fasta -q TTTNCCCCCAGCGCTTCAGCGTTC [-c 0.001] -r reference.fasta [-g] [-m 0.20]
+usage: crispr_tester.py [-h] -a mafft_alignment.fasta [-s TTTNCCCCCAGCGCTTCAGCGTTC] [-l sequence_list.tsv] [-c 0.001] -r reference.fasta -o /output/folder [-g] [-m 0.20]
 
 Extract region from fasta file.
 
@@ -49,18 +49,29 @@ optional arguments:
   -h, --help            show this help message and exit
   -a mafft_alignment.fasta, --alignment mafft_alignment.fasta
                         Mafft alignment file. Mandatory.
-  -q TTTNCCCCCAGCGCTTCAGCGTTC, --query TTTNCCCCCAGCGCTTCAGCGTTC
-                        Sequence to test (PAM+crRNA). Mandatory.
+  -s TTTNCCCCCAGCGCTTCAGCGTTC, --sequence TTTNCCCCCAGCGCTTCAGCGTTC
+                        Sequence to test (PAM+crRNA). Must use "-s" or "-l".
+  -l sequence_list.tsv, --list sequence_list.tsv
+                        A 2-column tab-separated file: Description<tab>Sequence. Must use "-s" or "-l".
   -c 0.001, --cutoff 0.001
                         Cutoff frequency to keep a variant. Must be between 0 and 1. Default is 0.001.
   -r reference.fasta, --reference reference.fasta
                         Reference fasta file. Mandatory.
+  -o /output/folder, --output /output/folder
+                        Output folder path.
   -g, --gap             Allows gaps in GGGenome search. Default is False.
   -m 0.20, --mismatch 0.20
-                        Percentage of mismatch allowed. Minimum is 0 and maximum is 0.25 (GGGenome requirement).
-                        Includes gaps if "-g" is used. Default is 0.20.
+                        Percentage of mismatch allowed. Minimum is 0 and maximum is 0.25 (GGGenome requirement). Includes gaps if "-g" is used. Default is 0.20.
 ```
+## Input sequence(s)
+If you prefer to run the analysis on a single crRNA, you can use the option `-s`. If you want to test multiple crRNAs, you can use the `-l`option. this option will run each sequence automatically one after the other. A parallel implementation might be implemented in the future.
 
+if the `-l` option is selected, the input file for must contain one entry per line. Each line contains two tab-separated columns whenre the 1st column is a description (try to keep it short as it goes intor the file names) and the 2nd column is the sequence. Here an example file (the `<tab>` are just to indicate where the tab character shoul be inserted):
+```
+Broughton-N<tab>TTTNCCCCCAGCGCUUCAGCGUUC
+Broughton-E<tab>GUGGUAUUCUUGCUAGUUAC
+Liu-N<tab>CTGCTGCTTGACAGATTGAACCAG
+```
 ## Outputs
 Cross-reactivity output files:
 - GGGenome_matches.tsv -> GGGenome "raw" results with full details.

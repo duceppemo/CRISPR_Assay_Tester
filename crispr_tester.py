@@ -8,28 +8,33 @@ from tqdm import tqdm
 import subprocess
 import io
 from math import floor
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 
 class FastaExtract(object):
     def __init__(self, args):
         args = args
         self.mafft_alignment = args.alignment
-        self.query = args.query
+        self.sequence = args.sequence
+        self.list = args.list
         self.cutoff = args.cutoff
         self.ref = args.reference
         self.gap = args.gap
         self.mismatch = args.mismatch
+        self.list = args.list
+        self.output_folder = args.output
 
         # Data
-        self.roi_dict = dict
+        self.sample_dict = dict()
 
         # Output files
-        self.extracted = '.'.join(self.mafft_alignment.split('.')[:-1]) + '_extracted.txt'
-        self.stats = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'
-        self.output_tsv = os.path.dirname(self.mafft_alignment) + '/ROI_stats.tsv'
-        self.masked_output_tsv = os.path.dirname(self.mafft_alignment) + '/ROI_masked_stats.tsv'
-        self.gggenome_raw_output_tsv = os.path.dirname(self.mafft_alignment) + '/GGGenome_matches.tsv'
-        self.gggenome_summary_output_tsv = os.path.dirname(self.mafft_alignment) + '/GGGenome_summary.tsv'
+        alignment_name = '.'.join(os.path.basename(self.mafft_alignment).split('.')[:-1])
+        self.extracted = self.output_folder + alignment_name + '_extracted.txt'
+        self.output_tsv = self.output_folder + '/ROI_stats.tsv'
+        self.masked_output_tsv = self.output_folder + '/ROI_masked_stats.tsv'
+        self.gggenome_raw_output_tsv = self.output_folder + '/GGGenome_matches.tsv'
+        self.gggenome_summary_output_tsv = self.output_folder + '/GGGenome_summary.tsv'
 
         # Run
         self.run()
@@ -37,62 +42,115 @@ class FastaExtract(object):
     def run(self):
         self.check()  # Check if can find input alignment file
 
-        # Compute the maximum number of mismatch(es) automatically based on query length
-        max_diff = int(floor(len(self.query) * self.mismatch))
+        # Samples
+        if self.list:
+            self.sample_dict = FastaExtract.parse_list(self.list)
+        elif self.sequence:
+            self.sample_dict = {'crRNA': self.sequence}
 
-        ##### Cross-reactivity test #####
+        alignment_name = '.'.join(os.path.basename(self.mafft_alignment).split('.')[:-1])
 
-        print('Performing cross-reactivity test for {} with up to {} mismatche(s)'.format(self.query, max_diff))
+        # Loop all the input sequences
+        for desc, sequence in self.sample_dict.items():
+            print(sequence)
+            # Output files
+            extracted = self.output_folder + '/' + alignment_name + '_' + desc + '_extracted.txt'
+            output_tsv = self.output_folder + '/ROI_stats' + '_' + desc + '.tsv'
+            masked_output_tsv = self.output_folder + '/ROI_masked_stats' + '_' + desc + '.tsv'
+            gggenome_raw_output_tsv = self.output_folder + '/GGGenome_matches' + '_' + desc + '.tsv'
+            gggenome_summary_output_tsv = self.output_folder + '/GGGenome_summary' + '_' + desc + '.tsv'
 
-        # GGGenome
-        ggg_df, diff_dict = FastaExtract.loop_gggenome(self.query, max_diff, self.gap)
+            # Compute the maximum number of mismatch(es) automatically based on query length
+            max_diff = int(floor(len(sequence) * self.mismatch))
+            print('Performing cross-reactivity test with up to {} mismatch(es)'.format(max_diff))
 
-        # Write GGGenome df to CSV file
-        FastaExtract.print_table(ggg_df, self.gggenome_raw_output_tsv)
+            # GGGenome
+            ggg_df, diff_dict = FastaExtract.loop_gggenome(sequence, max_diff, self.gap)
 
-        # Create GGGenome summary dataframe
-        sum_df = FastaExtract.create_gggenome_summary(diff_dict, max_diff)
+            # Write GGGenome df to CSV file
+            FastaExtract.print_table(ggg_df, gggenome_raw_output_tsv)
 
-        # Write GGGenome summary to file from dataframe
-        FastaExtract.print_table(sum_df, self.gggenome_summary_output_tsv)
+            # Create GGGenome summary dataframe
+            sum_df = FastaExtract.create_gggenome_summary(diff_dict, max_diff)
 
-        # Extract start and end positions from the reference Wuhan sequences to perform the inclusivity analysis
-        start, end = FastaExtract.get_start_end_positions(ggg_df)
+            # Write GGGenome summary to file from dataframe
+            FastaExtract.print_table(sum_df, gggenome_summary_output_tsv)
 
+            # Extract start and end positions from the reference Wuhan sequences to perform the inclusivity analysis
+            start, end = FastaExtract.get_start_end_positions(ggg_df)
 
-        ##### Inclusivity test #####
+            ##### Inclusivity test #####
 
-        print('\nPerforming inclusivity test')
+            print('\nPerforming inclusivity test')
 
-        roi_ref = FastaExtract.extract_ref(self.ref, start, end)
-        print('\tReference ROI: {} ({}..{})'.format(roi_ref, start, end))
+            roi_ref = FastaExtract.extract_ref(self.ref, start, end)
+            print('\tReference ROI: {} ({}..{})'.format(roi_ref, start, end))
 
-        # Parse alignment file to extract counts for each variant of the region of interest
-        print('\tParsing MAFFT alignment file and extracting ROI for each entry')
-        FastaExtract.extract(self.mafft_alignment, start, end)  # comment for debug
-        roi_dict = FastaExtract.filter_n(self.extracted)
+            # Parse alignment file to extract counts for each variant of the region of interest
+            print('\tParsing MAFFT alignment file and extracting ROI for each entry')
+            FastaExtract.extract(self.mafft_alignment, extracted, start, end)  # comment for debug
+            roi_dict = FastaExtract.filter_n(extracted)
 
-        # Output the variant frequency table
-        print('\tFiltering ROI and preparing report file')
-        # Replace conserved bases with dots
-        df = FastaExtract.filter_cutoff(roi_dict, self.cutoff, roi_ref)
-        FastaExtract.print_table(df, self.output_tsv)  # Print table
+            # Output the variant frequency table
+            print('\tFiltering ROI and preparing report file')
+            # Replace conserved bases with dots
+            df = FastaExtract.filter_cutoff(roi_dict, self.cutoff, roi_ref)
+            FastaExtract.print_table(df, output_tsv)  # Print table
 
-        # Mask sequences
-        FastaExtract.mask_alignment(df)
-        FastaExtract.print_table(df, self.masked_output_tsv)
+            # Mask sequences
+            FastaExtract.mask_alignment(df)
+            FastaExtract.print_table(df, masked_output_tsv)
 
         print('\nDone!')
 
     def check(self):
+        # Replace "tild" with home folder path
         if '~' in self.mafft_alignment:
             self.mafft_alignment = os.path.expanduser(self.mafft_alignment)
+        # Check if path to MAFFT file is correct
         if not os.path.isfile(self.mafft_alignment):
             raise Exception('Could not locate alignment file. Please use absolute path to file.')
-
         # Check if mismatches/gaps is 25% or less. Otherwise GGGenome will return an error.
         if self.mismatch > 0.25:
             raise Exception('Number of mismatches/gaps should be 25% (0.25) or less.')
+        # Check if using a single sequence (-l) or a sequence list file
+        if self.sequence and self.list:
+            raise Exception('Cannot use "-s" and "-list" options simultaneously.')
+        if not self.sequence and not self.list:
+            raise Exception('Please use "-s" or "-l".')
+        # Check if sequence list file exists
+        if self.list:
+            if not os.path.isfile(self.list):
+                raise Exception('Could not locate list file. Please use absolute path to file.')
+        # Check for illegal characters in sequences
+        if self.list:
+            if not all(FastaExtract.check_sequence(seq) for desc, seq in self.sample_dict.items()):
+                raise Exception('Query sequence contains illegal bases. Only "ATUCGN" are accepted.')
+        elif self.sequence:
+            if not FastaExtract.check_sequence(self.sequence):
+                raise Exception('Query sequence contains illegal bases. Only "ATUCGN" are accepted.')
+        # Create output folder, in case it doesn't exists
+        FastaExtract.make_folder(self.output_folder)
+
+    @staticmethod
+    def make_folder(folder):
+        # Will create parent directories if don't exist and will not return error if already exists
+        Path(folder).mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def check_sequence(seq):
+        return all(nuc in ['A', 'T', 'C', 'G', 'U', 'N'] for nuc in seq)
+
+    @staticmethod
+    def parse_list(list_file):
+        sample_dict = dict()
+        with open(list_file, 'r') as f:
+            for line in f:
+                line = line.rstrip()
+                desc = line.split('\t')[0].replace(' ', '_')  # Replace space by underscore
+                seq = line.split('\t')[1]
+                sample_dict[desc] = seq
+        return sample_dict
 
     @staticmethod
     def block_read(my_file, size=1048576):
@@ -114,13 +172,12 @@ class FastaExtract(object):
         return total_cnt
 
     @staticmethod
-    def extract(input_alignment, start, end):
-        out_file = '.'.join(input_alignment.split('.')[:-1]) + '_extracted.txt'
+    def extract(input_alignment, extracted, start, end):
 
         start_index = start - 1
         end_index = end
 
-        with open(out_file, 'w') as out_f:
+        with open(extracted, 'w') as out_f:
             with gzip.open(input_alignment, 'rb', 1024*1024) if input_alignment.endswith('gz') \
                     else open(input_alignment, 'r', 1024*1024) as in_f:
                 seq_list = list()
@@ -251,7 +308,6 @@ class FastaExtract(object):
             # Replace variant sequence in dataframe with masked one
             df.loc[i, 'Variant'] = masked_seq
 
-        # print(df)
         return df
 
     @staticmethod
@@ -351,7 +407,6 @@ class FastaExtract(object):
                     diff_dict[org][diff] = 0
 
             # Fetch the difference values
-            matching_row_list = list()
             if org.startswith('chr'):
                 matching_row_list = ggg_df.index[ggg_df['# name'] == org].tolist()
             else:
@@ -434,11 +489,16 @@ if __name__ == '__main__':
                         type=str,
                         help='Mafft alignment file.'
                              ' Mandatory.')
-    parser.add_argument('-q', '--query', metavar='TTTNCCCCCAGCGCTTCAGCGTTC',
-                        required=True,
+    parser.add_argument('-s', '--sequence', metavar='TTTNCCCCCAGCGCTTCAGCGTTC',
+                        required=False,
                         type=str,
                         help='Sequence to test (PAM+crRNA).'
-                             ' Mandatory.')
+                             ' Must use "-s" or "-l".')
+    parser.add_argument('-l', '--list', metavar='sequence_list.tsv',
+                        required=False,
+                        type=str,
+                        help='A 2-column tab-separated file: Description<tab>Sequence.'
+                             ' Must use "-s" or "-l".')
     parser.add_argument('-c', '--cutoff', metavar='0.001',
                         type=float, default=0.001,
                         required=False,
@@ -449,6 +509,10 @@ if __name__ == '__main__':
                         type=str,
                         help='Reference fasta file.'
                              ' Mandatory.')
+    parser.add_argument('-o', '--output', metavar='/output/folder',
+                        required=True,
+                        type=str,
+                        help='Output folder path.')
     parser.add_argument('-g', '--gap',
                         action='store_true',
                         help='Allows gaps in GGGenome search. Default is False.')
