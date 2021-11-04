@@ -2,7 +2,7 @@
 CRISPR cross-reactivity and inclusivity *in silico* test.
 
 ## Description
-This is a python3 (v3.9 used) script meant to be run in a Unix environment. I will not run on a Windows system.
+This is a python3 (v3.9 used) script meant to be run in a Unix environment. I will not run on a Windows system, unless you run the Ubuntu terminal in Win10 (https://ubuntu.com/tutorials/ubuntu-on-windows#1-overview).
 
 A working internet access is required to run GGGenome (https://gggenome.dbcls.jp/).
 
@@ -22,13 +22,13 @@ mafft \
 
 A pre-computed alignment file for all SARS-CoV-2 complete sequences from NCBI (*time stamp*) will be available soon for download.
 
-The SARS-CoV-2 Wuhan-Hu-1 reference sequence can be downloaded by clicking the this link: [NC_045512.2](https://www.ncbi.nlm.nih.gov/nuccore/NC_045512.2?report=fasta).
+The SARS-CoV-2 Wuhan-Hu-1 reference sequence can be downloaded by clicking this link: [NC_045512.2](https://www.ncbi.nlm.nih.gov/nuccore/NC_045512.2?report=fasta).
 
 ## Installation
 - Make sure you have `conda` installed (https://docs.conda.io/en/latest/miniconda.html).
 - Create a virtual environment to install the required packages:
 ```
-conda create -n crispr_tester git panadas mafft requests tqdm
+conda create -n crispr_tester git pandas mafft requests tqdm
 conda activate crispr_tester
 ```
 - Clone repository and test tool:
